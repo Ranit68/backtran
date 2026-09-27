@@ -80,7 +80,8 @@ select.inp{font-family:var(--mono); font-size:13px; cursor:pointer}
 .field{position:relative}
 .field .inp{padding-right:38px}
 .ac{position:absolute; top:calc(100% + 5px); left:0; right:0; background:var(--ink-3);
-  border:1px solid var(--line); border-radius:8px; overflow:hidden; z-index:30; max-height:264px; overflow-y:auto}
+  border:1px solid var(--line); border-radius:8px; overflow:hidden; z-index:50; max-height:280px; overflow-y:auto;
+  box-shadow:0 12px 32px rgba(0,0,0,.5)}
 .ac[hidden]{display:none}
 .ac__i{display:flex; align-items:center; gap:9px; padding:9px 11px; cursor:pointer; font-size:14px; border-bottom:1px solid rgba(42,54,68,.55)}
 .ac__i:last-child{border-bottom:0}
@@ -229,6 +230,7 @@ select.inp{font-family:var(--mono); font-size:13px; cursor:pointer}
       </div>
     </div>
     <div class="live"><span class="dot" id="dot"></span><span id="liveTxt">checking…</span></div>
+    <button class="mast__btn" id="baseChip" type="button" title="Active API — click to change">api: …</button>
     <button class="mast__btn" id="cfgBtn" type="button">API settings</button>
   </div>
 </header>
@@ -376,12 +378,22 @@ select.inp{font-family:var(--mono); font-size:13px; cursor:pointer}
 /* ============================ state ============================ */
 var LS = "backtran.base";
 var DEFAULT_REMOTE = "https://backtran1.vercel.app/api";
-var base = (function () {
-  try { var v = localStorage.getItem(LS); if (v) return v; } catch (e) {}
-  if (location.protocol === "http:" || location.protocol === "https:") return location.origin + "/api";
-  return DEFAULT_REMOTE;
-})();
+var base = DEFAULT_REMOTE;
 var adminKey = "";
+
+/* Prefer a same-origin /api when this page is served by the backend itself.
+   Opened from a plain static host or a local preview there is no same-origin
+   API, so fall back to the deployed backend instead of 404-ing. */
+function resolveBase() {
+  var saved = null;
+  try { saved = localStorage.getItem(LS); } catch (e) {}
+  if (saved) return Promise.resolve(saved);
+  if (location.protocol !== "http:" && location.protocol !== "https:") return Promise.resolve(DEFAULT_REMOTE);
+  var same = location.origin + "/api";
+  return fetch(same + "/health")
+    .then(function (r) { return r.ok ? same : DEFAULT_REMOTE; })
+    .catch(function () { return DEFAULT_REMOTE; });
+}
 
 var $ = function (s, r) { return (r || document).querySelector(s); };
 var esc = function (s) {
@@ -481,7 +493,7 @@ function wireAC(inputId, acId) {
       });
     });
   }
-  inp.addEventListener("input", function () {
+  function run() {
     var q = inp.value.trim();
     clearTimeout(timer);
     if (q.length < 2) return close();
@@ -491,8 +503,10 @@ function wireAC(inputId, acId) {
         items = res.json.data.results;
         cursor = -1; draw();
       });
-    }, 240);
-  });
+    }, 220);
+  }
+  inp.addEventListener("input", run);
+  inp.addEventListener("focus", function () { if (inp.value.trim().length >= 2) run(); });
   inp.addEventListener("blur", function () { setTimeout(close, 120); });
   inp.addEventListener("keydown", function (e) {
     if (ac.hidden) return;
@@ -945,7 +959,9 @@ function buildExplorer() {
 
 /* ============================ settings ============================ */
 var dlg = $("#cfg");
-$("#cfgBtn").addEventListener("click", function () { $("#cfgBase").value = base; $("#cfgMsg").textContent = ""; dlg.showModal(); });
+function openCfg() { $("#cfgBase").value = base; $("#cfgMsg").textContent = ""; if (dlg.showModal) dlg.showModal(); else dlg.setAttribute("open", ""); }
+$("#cfgBtn").addEventListener("click", openCfg);
+$("#baseChip").addEventListener("click", openCfg);
 $("#cfgTest").addEventListener("click", function () {
   var v = $("#cfgBase").value.trim().replace(/\/+$/, "");
   $("#cfgMsg").innerHTML = '<span class="spin"></span> Testing';
@@ -961,16 +977,27 @@ $("#cfgSave").addEventListener("click", function () {
   if (!v) return;
   base = v;
   try { localStorage.setItem(LS, v); } catch (e) {}
-  dlg.close();
+  if (dlg.close) dlg.close(); else dlg.removeAttribute("open");
+  paintBase();
   health();
   loadRoutes();
 });
 
 /* ============================ boot ============================ */
-health();
+function paintBase() {
+  var el = $("#baseChip");
+  if (!el) return;
+  var host = base;
+  try { host = new URL(base).host; } catch (e) {}
+  el.textContent = "api: " + host;
+}
+resolveBase().then(function (b) {
+  base = b;
+  paintBase();
+  health();
+  loadRoutes();
+});
 setInterval(health, 30000);
-$("#rQ").dispatchEvent(new Event("input"));
-loadRoutes();
 </script>
 </body>
 </html>
